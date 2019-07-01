@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"github.com/oklog/ulid"
-	"github.com/pkg/errors"
+	"github.com/pingcap/errors"
 	"github.com/prometheus/common/log"
 	"github.com/prometheus/tsdb"
 	"github.com/prometheus/tsdb/chunkenc"
@@ -56,10 +56,17 @@ func (db *promdb) Dump(dumpdir string) error {
 		return errors.Errorf("cannot dump into base directory")
 	}
 
+	if !Exists(dumpdir) {
+		if err := os.Mkdir(dumpdir, os.ModePerm); err != nil {
+			log.Error("create dump directory failed")
+			return errors.Trace(err)
+		}
+	}
+
 	dirs, err := blockDirs(db.dbpath)
 	if err != nil {
 		log.Warn("find blocks failed", err)
-		return err
+		return  errors.Trace(err)
 	}
 
 	for _, dir := range dirs {
@@ -84,12 +91,12 @@ func (db *promdb) overlap(meta *tsdb.BlockMeta) bool {
 func (db *promdb) readMetaFile(dir string) (*tsdb.BlockMeta, int64, error) {
 	b, err := ioutil.ReadFile(filepath.Join(dir, metaName))
 	if err != nil {
-		return nil, 0, err
+		return nil, 0,  errors.Trace(err)
 	}
 	var m tsdb.BlockMeta
 
 	if err := json.Unmarshal(b, &m); err != nil {
-		return nil, 0, err
+		return nil, 0, errors.Trace(err)
 	}
 	if m.Version != 1 {
 		return nil, 0, errors.Errorf("unexpected meta file version %d", m.Version)
@@ -166,13 +173,13 @@ func (db *promdb) head(dir string) error{
 	wlog, err := wal.NewSize(nil, nil, filepath.Join(dir, "wal"), wal.DefaultSegmentSize)
 	if err != nil {
 		log.Error("open wal failed", err)
-		return err
+		return errors.Trace(err)
 	}
 
 	head, err := tsdb.NewHead(nil, nil, wlog, minBlockRange)
 	if err != nil {
 		log.Error("init head chunk failed", err)
-		return err
+		return errors.Trace(err)
 	}
 
 
@@ -180,4 +187,15 @@ func (db *promdb) head(dir string) error{
 	return errors.Wrap(err, "dump head block")
 }
 
+
+func Exists(path string) bool {
+	_, err := os.Stat(path)
+	if err != nil {
+		if os.IsExist(err) {
+			return true
+		}
+		return false
+	}
+	return true
+}
 

@@ -4,6 +4,7 @@ go 1.12
 
 require (
 	github.com/oklog/ulid v1.3.1
+	github.com/pingcap/errors v0.11.4
 	github.com/pkg/errors v0.8.0
 	github.com/prometheus/client_golang v0.9.1
 	github.com/prometheus/common v0.0.0-20181113130724-41aa239b4cce
