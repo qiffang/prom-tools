@@ -11,6 +11,6 @@ require (
 	github.com/prometheus/tsdb v0.8.0
 	github.com/sirupsen/logrus v1.4.2 // indirect
 	github.com/stretchr/testify v1.3.0 // indirect
-	github.com/wushilin/stream v0.0.0-20160517090247-4c9093559eef // indirect
+	github.com/wushilin/stream v0.0.0-20160517090247-4c9093559eef
 	gopkg.in/alecthomas/kingpin.v2 v2.2.6
 )

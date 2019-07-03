@@ -9,26 +9,35 @@ import (
 	"github.com/prometheus/tsdb"
 	"github.com/prometheus/tsdb/chunkenc"
 	"github.com/prometheus/tsdb/wal"
+	"github.com/wushilin/stream"
 	"io/ioutil"
+	"math"
 	"os"
 	"path/filepath"
 	"time"
 )
 
 const (
-	metaName = "meta.json"
-	chunksName = "chunks"
-    indexName = "index"
+	metaName      = "meta.json"
+	chunksName    = "chunks"
+	indexName     = "index"
 	tombstoneName = "tombstones"
-	minBlockRange = int64(2*time.Hour)/1e6
+	minBlockRange = int64(2*time.Hour) / 1e6
 )
 
 type promdb struct {
 	dbpath string
 
 	compactor *tsdb.LeveledCompactor
-	start int64
-	end int64
+	start     int64
+	end       int64
+	blocks    []*block
+	head      *tsdb.Head
+}
+
+type block struct {
+	dir  string
+	meta *tsdb.BlockMeta
 }
 
 func Open(dbpath string, startTimeInMilliSec int64, endTimeInMilliSec int64) (*promdb, error) {
@@ -43,55 +52,117 @@ func Open(dbpath string, startTimeInMilliSec int64, endTimeInMilliSec int64) (*p
 		return nil, errors.Wrap(err, "create leveled compactor")
 	}
 
+	dirs, err := blockDirs(dbpath)
+	if err != nil {
+		return nil, errors.Trace(errors.Wrap(err, "find blocks fail"))
+	}
+
+	head, err := openHead(dbpath)
+	if err != nil {
+		return nil, errors.Wrap(err, "open head block fail")
+	}
+
+	minValidTime := int64(math.MinInt64)
+
+	blocks := make([]*block, len(dirs))
+	stream.FromArray(dirs).
+		Map(func(dir string) *block {
+			meta, _, err := readMetaFile(dir)
+			if err != nil {
+				panic(errors.Wrap(err, "read meta file failed"))
+			}
+			return &block{
+				dir:  dir,
+				meta: meta,
+			}
+		}).Peek(func(b *block) {
+		minValidTime = max(minValidTime, b.meta.MaxTime)
+	}).CollectTo(blocks)
+
+	if initErr := head.Init(minValidTime); initErr != nil {
+		return nil, errors.Wrap(err, "init head fail")
+	}
+
 	return &promdb{
-		dbpath: dbpath,
-		start: startTimeInMilliSec,
-		end: endTimeInMilliSec,
+		dbpath:    dbpath,
+		start:     startTimeInMilliSec,
+		end:       endTimeInMilliSec,
 		compactor: compactor,
+		blocks:    blocks,
+		head:      head,
 	}, nil
 }
 
 func (db *promdb) Dump(dumpdir string) error {
-	if dumpdir == db.dbpath {
-		return errors.Errorf("cannot dump into base directory")
-	}
-
 	if !Exists(dumpdir) {
 		if err := os.Mkdir(dumpdir, os.ModePerm); err != nil {
-			log.Error("create dump directory failed")
-			return errors.Trace(err)
+			return errors.Wrap(err, "create dump directory failed")
 		}
 	}
 
-	dirs, err := blockDirs(db.dbpath)
-	if err != nil {
-		log.Warn("find blocks failed", err)
-		return  errors.Trace(err)
-	}
+	//snapdir := filepath.Join(db.dbpath, "dump")
+	//name := fmt.Sprintf("%s-%x",
+	//	time.Now().UTC().Format("20060102T150405Z0700"),
+	//	rand.Int())
+	//tmpdir := filepath.Join(snapdir, name)
 
-	for _, dir := range dirs {
-		meta, _, err := db.readMetaFile(dir)
-		if err != nil {
-			log.Warn("read meta file failed", "dir=" + dir, err)
-			continue
+	stream.FromArray(db.blocks).Filter(func(b *block) bool {
+		if db.metaOverlap(b.meta) {
+			return true
 		}
 
-		if db.overlap(meta) {
-			db.link(meta.ULID.String(), dir, dumpdir)
+		return false
+	}).Each(func(b *block) {
+		if err := db.link(b.meta.ULID.String(), b.dir, dumpdir); err != nil {
+			panic(errors.Wrap(err, "link block fail"))
+		}
+	})
+
+	if db.overlap(db.head.MinTime(), db.head.MaxTime()) {
+		if err := db.dumpHead(dumpdir); err != nil {
+			return err
 		}
 	}
 
 	return nil
 }
 
-func (db *promdb) overlap(meta *tsdb.BlockMeta) bool {
-	return !(db.end < meta.MinTime || db.start > meta.MaxTime)
+func openHead(dbpath string) (*tsdb.Head, error) {
+	wlog, err := wal.NewSize(nil, nil, filepath.Join(dbpath, "wal"), wal.DefaultSegmentSize)
+	if err != nil {
+		log.Error("open wal failed", err)
+		return nil, errors.Trace(err)
+	}
+
+	head, err := tsdb.NewHead(nil, nil, wlog, 1)
+	if err != nil {
+		log.Error("init head chunk failed", err)
+		return nil, errors.Trace(err)
+	}
+
+	return head, nil
 }
 
-func (db *promdb) readMetaFile(dir string) (*tsdb.BlockMeta, int64, error) {
+func max(v1 int64, v2 int64) int64 {
+	if v1 > v2 {
+		return v1
+	}
+
+	return v2
+}
+
+func (db *promdb) metaOverlap(meta *tsdb.BlockMeta) bool {
+	return db.overlap(meta.MinTime, meta.MaxTime)
+}
+
+func (db *promdb) overlap(min int64, max int64) bool {
+	return !(db.end < min || db.start > max)
+}
+
+func readMetaFile(dir string) (*tsdb.BlockMeta, int64, error) {
 	b, err := ioutil.ReadFile(filepath.Join(dir, metaName))
 	if err != nil {
-		return nil, 0,  errors.Trace(err)
+		return nil, 0, errors.Trace(err)
 	}
 	var m tsdb.BlockMeta
 
@@ -169,24 +240,10 @@ func blockDirs(dir string) ([]string, error) {
 
 func chunkDir(dir string) string { return filepath.Join(dir, chunksName) }
 
-func (db *promdb) head(dir string) error{
-	wlog, err := wal.NewSize(nil, nil, filepath.Join(dir, "wal"), wal.DefaultSegmentSize)
-	if err != nil {
-		log.Error("open wal failed", err)
-		return errors.Trace(err)
-	}
-
-	head, err := tsdb.NewHead(nil, nil, wlog, minBlockRange)
-	if err != nil {
-		log.Error("init head chunk failed", err)
-		return errors.Trace(err)
-	}
-
-
-	_, err = db.compactor.Write(dir, head, db.start, db.end, nil)
+func (db *promdb) dumpHead(dumpdir string) error {
+	_, err := db.compactor.Write(dumpdir, db.head, db.head.MinTime(), db.head.MaxTime(), nil)
 	return errors.Wrap(err, "dump head block")
 }
-
 
 func Exists(path string) bool {
 	_, err := os.Stat(path)
@@ -198,4 +255,3 @@ func Exists(path string) bool {
 	}
 	return true
 }
-
