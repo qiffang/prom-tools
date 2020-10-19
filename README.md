@@ -13,8 +13,11 @@ Currently, there are 2 tools in the repo. One is used to import data to promethe
 {"__name__":"oiwwpnxbzvnglxqfmmgydouluripxyalq","blppopdupk":"cnzzbfczfyogugkqbbgptameitukmyqrvfdnbvuennkrjroklunnmhonozwjbhtcyxtmrtslabqlkoimdafoipcrdbtjaxlzlebaiwkjzzpuusp","bvqcfmtc":"nrmpn","etunlkkq":"jlc","ieh":"nrcqguxwfdarfbnnjwrqyavsvr","igaxksxlcgqesc":"ymmoqcbydfyiiqjarxdplpejidikup","peyxeulfptstx":"mznnnpqbwkjjh","pwtdcjrs":"kupicpeeswkcvcqjsbntrqjrzqceppkgkkglgbckqrwo","vgcdywyzlg":"ucafvj","xlqhwhxrcya":"ztnhtzzrz","xtbla":"mznnnpqbwkjjh","zigoeqifdui":"mnjbteqhtkxeovesczl","zxknjgnlwexn":"hcasvfr", "__value__":"111", "__time__":1585799158000}
 ```
 I extend the format of prometheus label, there are 2 special labels: `__time__` and `__value__`.
-`__time__`:  the timestamp of the series
-`__value`: the value of the series
+
+`__time__`:  the timestamp of the series.
+
+`__value`: the value of the series.
+
 They are not appended the collection of prometheus labels.
 
 # Export Tool
