@@ -6,7 +6,7 @@ Currently, there are 2 tools in the repo. One is used to import data to promethe
 ## How to use it
 ### import data
 ```$xslt
-  ./import-tool import --input=$SimpleData --output=$PrometheusDataDirectory
+  ./import-tool import --input=$SimpleData --output=$emptyDirectory
 ```
 #### SimpleData Format
 ```$xslt
@@ -19,6 +19,14 @@ I extend the format of prometheus label, there are 2 special labels: `__time__` 
 `__value`: the value of the series.
 
 They are not appended the collection of prometheus labels.
+
+#### Note
+Start prometheus and gc the data
+```$xslt
+./prometheus  --config.file=prometheus.yml --storage.tsdb.path=$outputPath
+```
+
+
 
 # Export Tool
 ## How to use it
